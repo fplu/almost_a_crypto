@@ -14,10 +14,10 @@ These projects totally ignore the network part of crypto-currencies and the diff
 To be able to build this project a classical Rust installation is enough. 
 
 The libraries used (visible in the Cargo.toml file) are:
-    sha2 = "0.10.2
-    ed25519-dalek = "1.0.1
-    rand = "0.7.0
-    num = "0.4.0"
+ - sha2 = "0.10.2
+ - ed25519-dalek = "1.0.1
+ - rand = "0.7.0
+ - num = "0.4.0"
 
 The **sha2** library is used for the hash calculation of blocks. Indeed, the mining in this project is done on CPU for simplicity reasons.
 
