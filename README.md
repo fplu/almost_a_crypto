@@ -2,11 +2,14 @@
 
 This project implements many of the features present in the operation of cryptocurrencies.
 These features include:
-    - the blockchain
-    - the merkle tree
-    - the coinbase user
-    - numerous checks to validate blocks and transactions
-    - 3 types of nodes (full, debug and the genesis node that start the blockchains)
+ - the blockchain
+ - the merkle tree
+ - the coinbase user
+ - numerous checks to validate blocks and transactions
+ - 3 types of nodes
+   - full, 
+   - debug and 
+   - genesis (node that start the blockchains)
 
 
 ## Built With
