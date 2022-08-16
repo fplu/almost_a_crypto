@@ -7,10 +7,6 @@ use crate::{reader::{Readable, read_u128}, error::Error, writer::{Writable, writ
 #[derive(Copy, Clone)]
 pub struct  Sha256Hash {
 	pub arr_u128: [u128; 2],
-	// pub arr_u64: [u64; 4],
-	// pub arr_u32: [u32; 8],
-	// pub arr_u16: [u16; 16],
-	// pub arr_u8: [u8; 32]
 }
 
 
@@ -73,7 +69,6 @@ impl Sha256Hash {
         for elem in arr_of_bytes {
             hasher.update(elem);
         }
-            // hasher.digest
 
 		Sha256Hash::from_bytes(hasher.finalize().to_vec().try_into().unwrap())
 
@@ -90,10 +85,6 @@ impl Sha256Hash {
 	pub fn as_u128(&self) -> &[u128; 2] {
 		&self.arr_u128
 	}
-	
-	// pub fn as_u32(&self) -> &[u32; 8] {
-	// 	unsafe{&self.arr_u32}
-	// }
 
 	pub fn to_bytes(&self) -> [u8; 32]  {
 		[self.arr_u128[0].to_be_bytes().to_vec(), self.arr_u128[1].to_be_bytes().to_vec()].concat().try_into().unwrap()

@@ -2,17 +2,12 @@ use std::fmt::{self, Debug, Formatter};
 use std::io::Read;
 use std::io::Write;
 
-/*
-Note: I do not now if message should be sign by both part.
-*/
 use super::signature::Signable;
 use crate::error::Error;
 use crate::num::Num;
 use crate::reader::{read_signature, read_struct, read_u64, Readable};
 use crate::user::{PublicUser, User};
 use crate::writer::{write_signature, write_struct, write_u64, Writable};
-// use ed25519_dalek::ed25519::signature::Signature;
-// use ed25519_dalek::ed25519::signature::Signature;
 use ed25519_dalek::Signature;
 use rand::Rng;
 

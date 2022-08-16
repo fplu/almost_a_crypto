@@ -100,11 +100,7 @@ impl Readable for PublicUser {
 	}
 }
 
-// impl PartialEq for PublicUser {
-// 	fn eq(&self, public_user: &PublicUser) -> bool {
-// 		self.key == public_user.key
-// 	}
-// }
+
 
 impl Debug for PublicUser {
 	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
