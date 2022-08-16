@@ -1,24 +1,31 @@
 use std::fmt::{self, Debug, Formatter};
+use std::io::Read;
+use std::io::Write;
 use std::vec;
 
+use crate::reader::{read_u32, read_vec_struct, Readable};
+use crate::writer::{write_u32, write_vec_struct, Writable};
 use crate::{
-    block::Block,
-    blockchain::Blockchain,
-    error::Error,
-    ledger::Ledger,
-    reader::{Readable, Reader},
-    sha256::Sha256Hash,
+    block::Block, blockchain::Blockchain, error::Error, ledger::Ledger, sha256::Sha256Hash,
 };
 
 #[derive(Clone, PartialEq, Eq)]
 pub struct Merkle {
     pub blocks: Vec<Block>,
     pub chains: Vec<Blockchain>, // ordered index of the blockchain
-    pub main: usize,
+    pub main: u32,
 }
 
 impl Merkle {
-    pub const DIFFICULTY: u128 = 0xF8;
+    pub const DIFFICULTY: u128 = 0xF1FF;
+
+    pub fn zero() -> Self {
+        Merkle {
+            blocks: vec![],
+            chains: vec![],
+            main: 0,
+        }
+    }
 
     pub fn new_from_nothingness() -> Self {
         Merkle {
@@ -29,7 +36,7 @@ impl Merkle {
     }
 
     pub fn main(&self) -> &Blockchain {
-        &self.chains[self.main]
+        &self.chains[self.main as usize]
     }
 
     fn contains(&self, block: &Block) -> bool {
@@ -50,7 +57,7 @@ impl Merkle {
         block: &Block,
     ) -> Result<(Blockchain, Option<usize>), Error> {
         for (i, chain) in self.chains.iter().enumerate() {
-            if self.blocks[*chain.index.last().unwrap()].hash == block.content.prev_block_hash {
+            if chain.last(&self.blocks).hash == block.content.prev_block_hash {
                 return Ok((chain.clone(), Some(i)));
             }
         }
@@ -61,7 +68,7 @@ impl Merkle {
 
         for chain in self.chains.iter() {
             for (i, j) in chain.index.iter().enumerate() {
-                if *j == index {
+                if (*j as usize) == index {
                     let new_chain = chain.index[0..i + 1].to_vec();
 
                     let new_ledger = Ledger::new_unsafe(&new_chain, &self.blocks);
@@ -89,7 +96,7 @@ impl Merkle {
             Err(e) => return Err(e),
         };
 
-        let last_valid_block = &self.blocks[*blockchain.index.last().unwrap()];
+        let last_valid_block = blockchain.last(&self.blocks);
         if last_valid_block.content.index + 1 != block.content.index {
             return Err(Error::BlockIndexAreNotContiguous);
         }
@@ -113,11 +120,11 @@ impl Merkle {
             }
         };
 
-        self.chains[chain_index].index.push(block_index);
+        self.chains[chain_index].index.push(block_index as u32);
         self.chains[chain_index].ledger = new_ledger;
 
         if self.chains[chain_index].len() > self.main().len() {
-            self.main = chain_index
+            self.main = chain_index as u32
         }
 
         return Ok(());
@@ -126,49 +133,37 @@ impl Merkle {
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut bytes = vec![];
 
-        bytes.extend((self.blocks.len() as u32).to_be_bytes());
-        for elem in &self.blocks {
-            bytes.extend(elem.to_bytes())
-        }
-
-        bytes.extend((self.chains.len() as u32).to_be_bytes());
-        for elem in &self.chains {
-            bytes.extend(elem.to_bytes())
-        }
-
-        bytes.extend((self.main as u32).to_be_bytes());
+        self.to_writer(&mut bytes).ok();
 
         bytes
     }
     pub fn from_bytes(bytes: &Vec<u8>) -> Result<Self, Error> {
-        let mut reader = Reader::new(bytes.clone());
-
-        Self::from_reader(&mut reader)
+        let mut slice: &[u8] = bytes;
+        Self::from_reader(&mut slice)
     }
 }
 
-impl Readable<Merkle> for Merkle {
-    fn from_reader(reader: &mut Reader) -> Result<Self, Error> {
-        let blocks = match reader.read_vec() {
-            Ok(s) => s,
+impl Writable for Merkle {
+    fn to_writer(&self, writer: &mut dyn Write) -> Result<(), Error> {
+        write_vec_struct(writer, &self.blocks)
+            .and_then(|_| write_vec_struct(writer, &self.chains))
+            .and_then(|_| write_u32(writer, self.main as u32))
+    }
+}
+
+impl Readable for Merkle {
+    fn from_reader(reader: &mut dyn Read) -> Result<Self, Error> {
+        let mut merkle = Merkle::zero();
+
+        match read_vec_struct(reader, &mut merkle.blocks)
+            .and_then(|_| read_vec_struct(reader, &mut merkle.chains))
+            .and_then(|_| read_u32(reader, &mut merkle.main))
+        {
+            Ok(_) => (),
             Err(_) => return Err(Error::InvalidFormat),
         };
 
-        let chains = match reader.read_vec() {
-            Ok(s) => s,
-            Err(_) => return Err(Error::InvalidFormat),
-        };
-
-        let main = match reader.read_u32() {
-            Ok(s) => s,
-            Err(_) => return Err(Error::InvalidFormat),
-        } as usize;
-
-        Ok(Merkle {
-            blocks: blocks,
-            chains: chains,
-            main: main,
-        })
+        Ok(merkle)
     }
 }
 

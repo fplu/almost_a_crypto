@@ -72,7 +72,7 @@ fn merkle_to_byte_from_byte() {
     let payload: Vec<Transaction> = vec![transaction];
     let block_content = BlockContent::new(1, Time::from_second(0), Sha256Hash::zero(), payload);
 
-    let difficulty: u128 = 0xF8;
+    let difficulty: u128 = Merkle::DIFFICULTY;
     let (nonce, hash) = Miner::mine(&block_content, difficulty);
     let block = Block::new_mined(block_content, nonce, hash);
 

@@ -1,18 +1,22 @@
-use crate::error::Error;
-use crate::ledger::PartialLedger;
-use crate::reader::Readable;
-use crate::transaction::Transaction;
-use crate::{mining::Miner, reader::Reader};
-
 use super::ledger::Ledger;
 use super::sha256::Sha256Hash;
 use super::time::Time;
+use crate::error::Error;
+use crate::ledger::PartialLedger;
+use crate::merkle::Merkle;
+use crate::mining::Miner;
+use crate::num::Num;
+use crate::reader::{read_struct, read_u128, read_u32, read_vec_struct, Readable};
+use crate::transaction::Transaction;
+use crate::user::PublicUser;
+use crate::writer::{write_struct, write_u128, write_u32, write_vec_struct, Writable};
 use std::fmt::{self, Debug, Formatter};
+use std::io::{Read, Write};
 use std::vec;
 
 #[derive(Clone)]
 pub struct BlockContent {
-    pub index: usize,
+    pub index: u32,
     pub timestamp: Time,
     pub prev_block_hash: Sha256Hash,
     pub transactions: Vec<Transaction>,
@@ -38,6 +42,13 @@ impl Debug for Block {
 }
 
 impl Block {
+    pub fn zero() -> Self {
+        Block {
+            content: BlockContent::zero(),
+            proof_of_work: 0,
+            hash: Sha256Hash::zero(),
+        }
+    }
     pub fn new_genesis() -> Self {
         Block {
             content: BlockContent {
@@ -60,7 +71,7 @@ impl Block {
     }
 
     pub fn new(
-        index: usize,
+        index: u32,
         timestamp: Time,
         prev_block_hash: Sha256Hash,
         transactions: Vec<Transaction>,
@@ -130,48 +141,53 @@ impl Block {
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut bytes = vec![];
 
-        bytes.extend(self.proof_of_work.to_be_bytes());
-        bytes.extend(self.hash.to_bytes());
-        bytes.extend(self.content.to_bytes());
+        self.to_writer(&mut bytes).ok();
 
         bytes
     }
 
     pub fn from_bytes(bytes: &Vec<u8>) -> Result<Self, Error> {
-        let mut reader = Reader::new(bytes.clone());
-
-        Self::from_reader(&mut reader)
+        let mut slice: &[u8] = bytes;
+        Self::from_reader(&mut slice)
     }
 }
 
-impl Readable<Block> for Block {
-    fn from_reader(reader: &mut Reader) -> Result<Self, Error> {
-        let proof_of_work = match reader.read_u128() {
-            Ok(s) => s,
+impl Writable for Block {
+    fn to_writer(&self, writer: &mut dyn Write) -> Result<(), Error> {
+        write_u128(writer, self.proof_of_work)
+            .and_then(|_| write_struct(writer, &self.hash))
+            .and_then(|_| write_struct(writer, &self.content))
+    }
+}
+
+impl Readable for Block {
+    fn from_reader(reader: &mut dyn Read) -> Result<Self, Error> {
+        let mut block = Block::zero();
+
+        match read_u128(reader, &mut block.proof_of_work)
+            .and_then(|_| read_struct(reader, &mut block.hash))
+            .and_then(|_| read_struct(reader, &mut block.content))
+        {
+            Ok(_) => (),
             Err(_) => return Err(Error::InvalidFormat),
         };
 
-        let hash = match reader.read() {
-            Ok(s) => s,
-            Err(_) => return Err(Error::InvalidFormat),
-        };
-
-        let content = match reader.read() {
-            Ok(c) => c,
-            Err(_) => return Err(Error::InvalidFormat),
-        };
-
-        Ok(Block {
-            proof_of_work: proof_of_work,
-            hash: hash,
-            content: content,
-        })
+        Ok(block)
     }
 }
 
 impl BlockContent {
+    pub fn zero() -> Self {
+        BlockContent {
+            index: 0,
+            timestamp: Time::zero(),
+            prev_block_hash: Sha256Hash::zero(),
+            transactions: vec![],
+        }
+    }
+
     pub fn new(
-        index: usize,
+        index: u32,
         timestamp: Time,
         prev_block_hash: Sha256Hash,
         transactions: Vec<Transaction>,
@@ -184,59 +200,67 @@ impl BlockContent {
         }
     }
 
+    pub fn new_from_pending_transaction(
+        pending_transactions: &Vec<Transaction>,
+        merkle: &Merkle,
+        public_user: &PublicUser,
+    ) -> Self {
+        let ledger = &merkle.main().ledger;
+        let mut block_transactions: Vec<Transaction> = vec![Transaction::new_from_coinbase(
+            &public_user,
+            &Num::from_u64(1),
+        )];
+        for transaction in pending_transactions {
+            if !ledger.contains(transaction) {
+                block_transactions.push(transaction.clone());
+            }
+        }
+
+        BlockContent {
+            index: merkle.main().last(&merkle.blocks).content.index + 1,
+            timestamp: Time::now(),
+            prev_block_hash: merkle.main().last(&merkle.blocks).hash,
+            transactions: block_transactions,
+        }
+    }
+
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut bytes = vec![];
 
-        /*
-            in the code index is usize, because usize is faster than u64 on 32-bit or u32 on 64-bit
-            but machine still have to communicate, so we cast it to u32 before converting it to [u8]
-        */
-        bytes.extend((self.index as u32).to_be_bytes());
-        bytes.extend(self.timestamp.to_bytes());
-        bytes.extend(self.prev_block_hash.to_bytes());
-        bytes.extend((self.transactions.len() as u32).to_be_bytes());
-        for elem in &self.transactions {
-            bytes.extend(elem.to_bytes());
-        }
+        self.to_writer(&mut bytes).ok();
 
         bytes
     }
 
     pub fn from_bytes(bytes: &Vec<u8>) -> Result<Self, Error> {
-        let mut reader = Reader::new(bytes.clone());
-
-        Self::from_reader(&mut reader)
+        let mut slice: &[u8] = bytes;
+        Self::from_reader(&mut slice)
     }
 }
 
-impl Readable<BlockContent> for BlockContent {
-    fn from_reader(reader: &mut Reader) -> Result<Self, Error> {
-        let index = match reader.read_u32() {
-            Ok(s) => s,
-            Err(_) => return Err(Error::InvalidFormat),
-        } as usize;
+impl Writable for BlockContent {
+    fn to_writer(&self, writer: &mut dyn Write) -> Result<(), Error> {
+        write_u32(writer, self.index as u32)
+            .and_then(|_| write_struct(writer, &self.timestamp))
+            .and_then(|_| write_struct(writer, &self.prev_block_hash))
+            .and_then(|_| write_vec_struct(writer, &self.transactions))
+    }
+}
 
-        let timestamp = match reader.read() {
-            Ok(s) => s,
+impl Readable for BlockContent {
+    fn from_reader(reader: &mut dyn Read) -> Result<Self, Error> {
+        let mut block_content = BlockContent::zero();
+
+        match read_u32(reader, &mut block_content.index)
+            .and_then(|_| read_struct(reader, &mut block_content.timestamp))
+            .and_then(|_| read_struct(reader, &mut block_content.prev_block_hash))
+            .and_then(|_| read_vec_struct(reader, &mut block_content.transactions))
+        {
+            Ok(_) => (),
             Err(_) => return Err(Error::InvalidFormat),
         };
 
-        let prev_block_hash = match reader.read() {
-            Ok(s) => s,
-            Err(_) => return Err(Error::InvalidFormat),
-        };
-
-        let transactions = match reader.read_vec() {
-            Ok(s) => s,
-            Err(_) => return Err(Error::InvalidFormat),
-        };
-
-        Ok(BlockContent {
-            index: index,
-            timestamp: timestamp,
-            prev_block_hash: prev_block_hash,
-            transactions: transactions,
-        })
+        Ok(block_content)
     }
 }
 

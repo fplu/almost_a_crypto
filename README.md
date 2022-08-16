@@ -6,7 +6,7 @@ These features include:
     - the merkle tree
     - the coinbase user
     - numerous checks to validate blocks and transactions
-These projects totally ignore the network part of crypto-currencies and the different types of nodes that can be part of it.
+    - 3 types of nodes (full, debug and the genesis node that start the blockchains)
 
 
 ## Built With

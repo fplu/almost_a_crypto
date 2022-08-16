@@ -1,4 +1,6 @@
 use std::fmt::{self, Debug, Formatter};
+use std::io::Read;
+use std::io::Write;
 
 /*
 Note: I do not now if message should be sign by both part.
@@ -6,11 +8,13 @@ Note: I do not now if message should be sign by both part.
 use super::signature::Signable;
 use crate::error::Error;
 use crate::num::Num;
-use crate::reader::{Readable, Reader};
+use crate::reader::{read_signature, read_struct, read_u64, Readable};
 use crate::user::{PublicUser, User};
+use crate::writer::{write_signature, write_struct, write_u64, Writable};
 // use ed25519_dalek::ed25519::signature::Signature;
 // use ed25519_dalek::ed25519::signature::Signature;
 use ed25519_dalek::Signature;
+use rand::Rng;
 
 #[derive(Clone)]
 pub struct TransactionContent {
@@ -27,6 +31,33 @@ pub struct Transaction {
 }
 
 impl Transaction {
+    pub fn new_from_coinbase(to: &PublicUser, value: &Num) -> Self {
+        Transaction {
+            content: TransactionContent {
+                from: PublicUser::new_coinbase(),
+                to: to.clone(),
+                value: value.clone(),
+                nonce: rand::thread_rng().gen_range(0, u64::max_value()),
+            },
+            signature: Signature::from_bytes(&[
+                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                0, 0, 0, 0, 0, 0, 0, 0,
+            ])
+            .unwrap(),
+        }
+    }
+    pub fn zero() -> Self {
+        Transaction {
+            content: TransactionContent::zero(),
+            signature: Signature::from_bytes(&[
+                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                0, 0, 0, 0, 0, 0, 0, 0,
+            ])
+            .unwrap(),
+        }
+    }
     pub fn new(from: User, to: PublicUser, value: Num, once: u64) -> Self {
         let content = TransactionContent {
             from: from.as_public(),
@@ -59,35 +90,35 @@ impl Transaction {
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut bytes = vec![];
 
-        bytes.extend(self.signature.to_bytes());
-        bytes.extend(self.content.to_bytes());
+        self.to_writer(&mut bytes).ok();
 
         bytes
     }
 
     pub fn from_bytes(bytes: &Vec<u8>) -> Result<Self, Error> {
-        let mut reader = Reader::new(bytes.clone());
-
-        Self::from_reader(&mut reader)
+        let mut slice: &[u8] = bytes;
+        Self::from_reader(&mut slice)
     }
 }
 
-impl Readable<Transaction> for Transaction {
-    fn from_reader(reader: &mut Reader) -> Result<Self, Error> {
-        let signature = match reader.read_signature() {
-            Ok(s) => s,
-            Err(_) => return Err(Error::InvalidFormat),
-        };
+impl Writable for Transaction {
+    fn to_writer(&self, writer: &mut dyn Write) -> Result<(), Error> {
+        write_signature(writer, &self.signature).and_then(|_| write_struct(writer, &self.content))
+    }
+}
 
-        let content = match reader.read() {
-            Ok(c) => c,
+impl Readable for Transaction {
+    fn from_reader(reader: &mut dyn Read) -> Result<Self, Error> {
+        let mut transaction = Transaction::zero();
+
+        match read_signature(reader, &mut transaction.signature) //
+            .and_then(|_| read_struct(reader, &mut transaction.content))
+        {
+            Ok(_) => (),
             Err(e) => return Err(e),
         };
 
-        Ok(Transaction {
-            signature: signature,
-            content: content,
-        })
+        Ok(transaction)
     }
 }
 
@@ -104,52 +135,52 @@ impl Debug for Transaction {
 }
 
 impl TransactionContent {
+    pub fn zero() -> Self {
+        TransactionContent {
+            from: PublicUser::zero(),
+            to: PublicUser::zero(),
+            value: Num::zero(),
+            nonce: 0,
+        }
+    }
+
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut bytes = vec![];
 
-        bytes.extend(self.from.to_bytes());
-        bytes.extend(self.to.to_bytes());
-        bytes.extend(self.nonce.to_be_bytes());
-        bytes.extend(self.value.to_bytes());
+        self.to_writer(&mut bytes).ok();
 
         bytes
     }
 
     pub fn from_bytes(bytes: &Vec<u8>) -> Result<Self, Error> {
-        let mut reader = Reader::new(bytes.clone());
-
-        Self::from_reader(&mut reader)
+        let mut slice: &[u8] = bytes;
+        Self::from_reader(&mut slice)
     }
 }
 
-impl Readable<TransactionContent> for TransactionContent {
-    fn from_reader(reader: &mut Reader) -> Result<Self, Error> {
-        let from = match reader.read() {
-            Ok(s) => s,
+impl Writable for TransactionContent {
+    fn to_writer(&self, writer: &mut dyn Write) -> Result<(), Error> {
+        write_struct(writer, &self.from)
+            .and_then(|_| write_struct(writer, &self.to))
+            .and_then(|_| write_u64(writer, self.nonce))
+            .and_then(|_| write_struct(writer, &self.value))
+    }
+}
+
+impl Readable for TransactionContent {
+    fn from_reader(reader: &mut dyn Read) -> Result<Self, Error> {
+        let mut transaction_content = TransactionContent::zero();
+
+        match read_struct(reader, &mut transaction_content.from)
+            .and_then(|_| read_struct(reader, &mut transaction_content.to))
+            .and_then(|_| read_u64(reader, &mut transaction_content.nonce))
+            .and_then(|_| read_struct(reader, &mut transaction_content.value))
+        {
+            Ok(_) => (),
             Err(_) => return Err(Error::InvalidFormat),
         };
 
-        let to = match reader.read() {
-            Ok(s) => s,
-            Err(_) => return Err(Error::InvalidFormat),
-        };
-
-        let nonce = match reader.read_u64() {
-            Ok(s) => s,
-            Err(_) => return Err(Error::InvalidFormat),
-        };
-
-        let value = match reader.read() {
-            Ok(number) => number,
-            Err(_) => return Err(Error::InvalidFormat),
-        };
-
-        Ok(TransactionContent {
-            from: from,
-            to: to,
-            nonce: nonce,
-            value: value,
-        })
+        Ok(transaction_content)
     }
 }
 

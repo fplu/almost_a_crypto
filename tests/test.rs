@@ -47,7 +47,7 @@ fn merkle_add_block() {
     let payload: Vec<Transaction> = vec![transaction];
     let block_content = BlockContent::new(1, Time::from_second(0), Sha256Hash::zero(), payload);
 
-    let difficulty: u128 = 0xF8;
+    let difficulty: u128 = Merkle::DIFFICULTY;
     let (nonce, hash) = Miner::mine(&block_content, difficulty);
     let block = Block::new_mined(block_content, nonce, hash);
 
@@ -74,7 +74,7 @@ fn merkle_add_block_from_invalid_user() {
     let payload: Vec<Transaction> = vec![transaction];
     let block_content = BlockContent::new(1, Time::from_second(0), Sha256Hash::zero(), payload);
 
-    let difficulty: u128 = 0xF8;
+    let difficulty: u128 = Merkle::DIFFICULTY;
     let (nonce, hash) = Miner::mine(&block_content, difficulty);
     let block = Block::new_mined(block_content, nonce, hash);
 
@@ -95,7 +95,7 @@ fn merkle_add_block_no_transaction() {
     let payload: Vec<Transaction> = vec![];
     let block_content = BlockContent::new(1, Time::from_second(0), Sha256Hash::zero(), payload);
 
-    let difficulty: u128 = 0xF8;
+    let difficulty: u128 = Merkle::DIFFICULTY;
     let (nonce, hash) = Miner::mine(&block_content, difficulty);
     let block = Block::new_mined(block_content, nonce, hash);
 
@@ -111,7 +111,7 @@ fn merkle_add_block_no_transaction() {
 
 fn block_with_transaction(
     transaction_nonce: u64,
-    index: usize,
+    index: u32,
     prev_block_hash: Sha256Hash,
 ) -> Block {
     let from = User::new_coinbase();

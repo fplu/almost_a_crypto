@@ -1,11 +1,15 @@
+use std::fmt::{self, Debug, Formatter};
+use std::io::Read;
+use std::io::Write;
 use std::vec;
 
 use crate::block::Block;
 use crate::error::Error;
 use crate::num::Num;
-use crate::reader::{Readable, Reader};
+use crate::reader::{read_struct, read_vec_struct, read_vec_u64, Readable};
 use crate::transaction::Transaction;
 use crate::user::PublicUser;
+use crate::writer::{write_struct, write_vec_struct, write_vec_u64, Writable};
 
 #[derive(Clone, PartialEq, Eq)]
 pub struct UserData {
@@ -40,12 +44,12 @@ impl Ledger {
         }
     }
 
-    pub fn new_unsafe(chain: &Vec<usize>, blocks: &Vec<Block>) -> Self {
+    pub fn new_unsafe(chain: &Vec<u32>, blocks: &Vec<Block>) -> Self {
         let ledger = Ledger::empty();
         let mut partial_ledger = PartialLedger::empty();
 
         for i in chain {
-            let block = &blocks[*i];
+            let block = &blocks[*i as usize];
 
             for transaction in &block.content.transactions {
                 partial_ledger.apply_transaction(&ledger, &transaction).ok();
@@ -54,31 +58,12 @@ impl Ledger {
         partial_ledger.to_ledger(&ledger)
     }
 
-    // pub fn verify_and_actualize(
-    //     &mut self,
-    //     blockchain: Blockchain,
-    //     difficulty: u128,
-    // ) -> Result<bool, bool> {
-    //     let mut is_new_block = false;
-    //     let mut nonces: Vec<u128> = vec![];
-    //     for block in blockchain.blocks {
-    //         if block.content.prev_block_hash == self.last_block_hash {
-    //             is_new_block = true;
-    //         }
-
-    //         if !is_new_block {
-    //             continue;
-    //         }
-
-    //         match block.verify_and_actualize(difficulty, &nonces, self) {
-    //             Ok(b) => (),
-    //             Err(b) => return Err(b),
-    //         }
-    //         nonces.push(block.nonce);
-    //     }
-
-    //     return Ok(true);
-    // }
+    pub fn contains(&self, transaction: &Transaction) -> bool {
+        if self.nonces_transaction.contains(&transaction.content.nonce) {
+            return true;
+        }
+        return false;
+    }
 
     pub fn find_user_data(&self, public_user: PublicUser) -> Option<usize> {
         for (i, elem) in self.users.iter().enumerate() {
@@ -102,76 +87,93 @@ impl Ledger {
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut bytes = vec![];
 
-        bytes.extend((self.nonces_transaction.len() as u32).to_be_bytes());
-        for nonce in &self.nonces_transaction {
-            bytes.extend(nonce.to_be_bytes())
-        }
-        bytes.extend((self.users.len() as u32).to_be_bytes());
-        for user in &self.users {
-            bytes.extend(user.to_bytes())
-        }
+        self.to_writer(&mut bytes).ok();
 
         bytes
     }
 
     pub fn from_bytes(bytes: &Vec<u8>) -> Result<Self, Error> {
-        let mut reader = Reader::new(bytes.clone());
-
-        Self::from_reader(&mut reader)
+        let mut slice: &[u8] = bytes;
+        Self::from_reader(&mut slice)
     }
 }
 
-impl Readable<Ledger> for Ledger {
-    fn from_reader(reader: &mut Reader) -> Result<Self, Error> {
-        let nonces_transaction = match reader.read_vec_u64() {
-            Ok(s) => s,
+impl Debug for Ledger {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "________________________\nLedger\n________________________\n"
+        )
+        .ok();
+        for user in &self.users {
+            write!(f, "{:?}: {:?} coins\n", user.user, user.money).ok();
+        }
+        write!(f, "________________________\n")
+    }
+}
+
+impl Writable for Ledger {
+    fn to_writer(&self, writer: &mut dyn Write) -> Result<(), Error> {
+        write_vec_u64(writer, &self.nonces_transaction)
+            .and_then(|_| write_vec_struct(writer, &self.users))
+    }
+}
+
+impl Readable for Ledger {
+    fn from_reader(reader: &mut dyn Read) -> Result<Self, Error> {
+        let mut ledger = Ledger::empty();
+
+        match read_vec_u64(reader, &mut ledger.nonces_transaction)
+            .and_then(|_| read_vec_struct(reader, &mut ledger.users))
+        {
+            Ok(_) => (),
             Err(_) => return Err(Error::InvalidFormat),
         };
 
-        let users = match reader.read_vec() {
-            Ok(s) => s,
-            Err(_) => return Err(Error::InvalidFormat),
-        };
-
-        Ok(Ledger {
-            users: users,
-            nonces_transaction: nonces_transaction,
-        })
+        Ok(ledger)
     }
 }
 impl UserData {
+    pub fn zero() -> Self {
+        UserData {
+            user: PublicUser::zero(),
+            money: Num::zero(),
+        }
+    }
+
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut bytes = vec![];
 
-        bytes.extend(self.user.to_bytes());
-        bytes.extend(self.money.to_bytes());
+        self.to_writer(&mut bytes).ok();
 
         bytes
     }
 
     pub fn from_bytes(bytes: &Vec<u8>) -> Result<Self, Error> {
-        let mut reader = Reader::new(bytes.clone());
-
-        Self::from_reader(&mut reader)
+        let mut slice: &[u8] = bytes;
+        Self::from_reader(&mut slice)
     }
 }
 
-impl Readable<UserData> for UserData {
-    fn from_reader(reader: &mut Reader) -> Result<Self, Error> {
-        let user = match reader.read() {
-            Ok(s) => s,
-            Err(_) => return Err(Error::InvalidFormat),
-        };
+impl Writable for UserData {
+    fn to_writer(&self, writer: &mut dyn Write) -> Result<(), Error> {
+        write_struct(writer, &self.user) //
+            .and_then(|_| write_struct(writer, &self.money))
+    }
+}
 
-        let money = match reader.read() {
+impl Readable for UserData {
+    fn from_reader(reader: &mut dyn Read) -> Result<Self, Error> {
+        let mut user_data = UserData::zero();
+
+        match read_struct(reader, &mut user_data.user) //
+            .and_then(|_| read_struct(reader, &mut user_data.money))
+        {
             Ok(m) => m,
             Err(_) => return Err(Error::InvalidFormat),
         };
 
-        return Ok(UserData {
-            user: user,
-            money: money,
-        });
+        Ok(user_data)
     }
 }
 
@@ -188,10 +190,7 @@ impl PartialLedger {
             return true;
         }
 
-        if ledger
-            .nonces_transaction
-            .contains(&transaction.content.nonce)
-        {
+        if ledger.contains(&transaction) {
             return true;
         }
 

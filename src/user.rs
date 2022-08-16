@@ -1,8 +1,8 @@
 use ed25519_dalek::{Keypair, PublicKey, PUBLIC_KEY_LENGTH, SecretKey};
-use std::fmt::{self, Debug, Formatter};
+use std::{fmt::{self, Debug, Formatter}, io::{Read, Write}};
 use rand::rngs::OsRng;
 
-use crate::{reader::{Reader, Readable}, error::Error};
+use crate::{reader::{Readable}, error::Error, writer::Writable};
 
 #[derive(Copy, Clone, PartialEq, Eq)]
 pub struct PublicUser {
@@ -41,6 +41,13 @@ impl PublicUser {
 	pub const BITS:u32 = (PUBLIC_KEY_LENGTH as u32)*8;
 	pub const BYTES:usize = PUBLIC_KEY_LENGTH;
 
+	pub fn zero() -> Self {
+		let zero: [u8; 32]= [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+		PublicUser { 
+			key: PublicKey::from_bytes(&zero).unwrap()
+		} 
+	}
+
 	pub fn new_coinbase() -> Self {
 		let zero: [u8; 32]= [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
 		PublicUser { 
@@ -70,10 +77,21 @@ impl PublicUser {
 	}
 }
 
-impl Readable<PublicUser> for PublicUser {
+impl Writable for PublicUser {
+    fn to_writer(&self, writer: &mut dyn Write) -> Result<(), Error> {
+        match writer.write_all(self.key.as_bytes()) {
+			Ok(_) => Ok(()),
+			Err(_) => Err(Error::EndOfBuffer)
+		}
+    }
+}
 
-	fn from_reader(reader: &mut Reader) -> Result<Self, Error> {
-		let slice: [u8; PUBLIC_KEY_LENGTH] = match reader.read_bytes(PUBLIC_KEY_LENGTH) {
+impl Readable for PublicUser {
+	fn from_reader(reader: &mut dyn Read) -> Result<Self, Error> {
+
+		let mut slice: [u8; PUBLIC_KEY_LENGTH]= [0; PUBLIC_KEY_LENGTH];
+		
+		match reader.read_exact(&mut slice) {
 			Ok(s) => s,
 			Err(_) => return Err(Error::InvalidFormat),
 		};

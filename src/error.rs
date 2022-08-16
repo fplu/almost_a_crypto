@@ -17,6 +17,13 @@ pub enum Error {
     WrongTransactionSignature,
     SenderDoNotHaveEnoughMoney,
 
+    TcpListenerBind,
+    TcpStreamConnect,
+    TcpFailToSend,
+
+    MiningInterupted,
+    FailToGetMerkle,
+
     NotFound,
     InvalidFormat,
     EndOfBuffer,

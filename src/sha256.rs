@@ -1,8 +1,8 @@
-use std::{fmt::{ self, Debug, Formatter }};
+use std::{fmt::{ self, Debug, Formatter }, io::{Read, Write}};
 use sha2::Sha256;
 use sha2::Digest;
 
-use crate::{reader::{Reader, Readable}, error::Error};
+use crate::{reader::{Readable, read_u128}, error::Error, writer::{Writable, write_u128}};
 
 #[derive(Copy, Clone)]
 pub struct  Sha256Hash {
@@ -100,19 +100,24 @@ impl Sha256Hash {
 	}
 }
 
-impl Readable<Sha256Hash> for Sha256Hash {
-    fn from_reader(reader: &mut Reader) -> Result<Self, Error> {
-        let a = match reader.read_u128() {
-            Ok(v) => v,
-            Err(e) => return Err(e)
-        };
-        let b = match reader.read_u128() {
-            Ok(v) => v,
-            Err(e) => return Err(e)
-        };
-        Ok(Sha256Hash { 
-			arr_u128: [a, b]
-		})
+impl Writable for Sha256Hash {
+    fn to_writer(&self, writer: &mut dyn Write) -> Result<(), Error> {
+        write_u128(writer, self.arr_u128[0]) //
+        .and_then(|_| write_u128(writer, self.arr_u128[1]))
+    }
+}
+
+impl Readable for Sha256Hash {
+    fn from_reader(reader: &mut dyn Read) -> Result<Self, Error> {
+        let mut sha = Sha256Hash::zero();
+
+        match read_u128(reader, &mut sha.arr_u128[0]) //
+        .and_then(|_| read_u128(reader, &mut sha.arr_u128[1])) {
+            Ok(_) => (),
+            Err(_) => return Err(Error::InvalidFormat),
+        }
+
+        Ok(sha)
 	}
 
 }

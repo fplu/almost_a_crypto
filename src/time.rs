@@ -1,8 +1,13 @@
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::{
+    io::{Read, Write},
+    time::{SystemTime, UNIX_EPOCH},
+    u128,
+};
 
 use crate::{
     error::Error,
-    reader::{Readable, Reader},
+    reader::{read_u128, Readable},
+    writer::{write_u128, Writable},
 };
 
 #[derive(Copy, Clone)]
@@ -55,12 +60,22 @@ impl Time {
     }
 }
 
-impl Readable<Time> for Time {
-    fn from_reader(reader: &mut Reader) -> Result<Self, Error> {
-        Ok(Time::from_u128(match reader.read_u128() {
-            Ok(v) => v,
-            Err(e) => return Err(e),
-        }))
+impl Writable for Time {
+    fn to_writer(&self, writer: &mut dyn Write) -> Result<(), Error> {
+        write_u128(writer, self.to_u128())
+    }
+}
+
+impl Readable for Time {
+    fn from_reader(reader: &mut dyn Read) -> Result<Self, Error> {
+        let mut u: u128 = 0;
+
+        match read_u128(reader, &mut u) {
+            Ok(_) => (),
+            Err(_) => return Err(Error::InvalidFormat),
+        };
+
+        Ok(Time::from_u128(u))
     }
 }
 

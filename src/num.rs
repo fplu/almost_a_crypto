@@ -1,10 +1,13 @@
 use std::fmt::{self, Debug, Formatter};
+use std::io::Read;
+use std::io::Write;
 use std::{cmp::Ordering, ops::SubAssign, str::FromStr};
 
 use num::{rational::BigRational, FromPrimitive, Zero};
 
 use crate::error::Error;
-use crate::reader::{Readable, Reader};
+use crate::reader::{read_string, Readable};
+use crate::writer::{write_string, Writable};
 use std::ops::AddAssign;
 
 #[derive(Clone)]
@@ -32,37 +35,32 @@ impl Num {
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut bytes = vec![];
 
-        let str = self.value.to_string();
-        let b = str.as_bytes();
-        bytes.extend((b.len() as u32).to_be_bytes());
-        bytes.extend(b);
+        self.to_writer(&mut bytes).ok();
 
         bytes
     }
 
     pub fn from_bytes(bytes: &Vec<u8>) -> Result<Self, Error> {
-        let mut reader = Reader::new(bytes.clone());
-
-        Self::from_reader(&mut reader)
+        let mut slice: &[u8] = bytes;
+        Self::from_reader(&mut slice)
     }
 }
 
-impl Readable<Num> for Num {
-    fn from_reader(reader: &mut Reader) -> Result<Self, Error> {
-        let size = match reader.read_u32() {
-            Ok(s) => s,
-            Err(_) => return Err(Error::InvalidFormat),
-        } as usize;
+impl Writable for Num {
+    fn to_writer(&self, writer: &mut dyn Write) -> Result<(), Error> {
+        write_string(writer, self.to_string())
+    }
+}
 
-        let value_slice: Vec<u8> = match reader.read_bytes(size) {
+impl Readable for Num {
+    fn from_reader(reader: &mut dyn Read) -> Result<Self, Error> {
+        let mut str = String::new();
+        match read_string(reader, &mut str) {
             Ok(s) => s,
             Err(_) => return Err(Error::InvalidFormat),
         };
-        let value_str = match String::from_utf8(value_slice) {
-            Ok(str) => str,
-            Err(_) => return Err(Error::InvalidFormat),
-        };
-        let value = match BigRational::from_str(value_str.as_str()) {
+
+        let value = match BigRational::from_str(str.as_str()) {
             Ok(number) => number,
             Err(_) => return Err(Error::InvalidFormat),
         };
